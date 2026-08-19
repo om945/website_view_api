@@ -1,0 +1,5 @@
+[test]
+# Load test environment variables by default
+envFile = ".env.test"
+# Exclude Playwright-only tests from `bun test` — run those with `npx playwright test`
+pathIgnorePatterns = ["tests/browser.test.ts"]

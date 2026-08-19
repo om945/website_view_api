@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+model User {
+  id String @id @default(uuid())
+  googleId String @unique
+  email String @unique
+  name String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sites Site[]
+  sessions AuthSession[]
+  @@index([email])
+}
+
+model AuthSession {
+  id String @id @default(uuid())
+  tokenHash String @unique
+  userId String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Site {
+  id String @id @default(uuid())
+  userId String
+  name String
+  domain String
+  siteKey String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  visitors Visitor[]
+  sessions Session[]
+  pageViews PageView[]
+  events Event[]
+  @@index([userId])
+  @@index([domain])
+}
+
+model Visitor {
+  id String @id @default(uuid())
+  siteId String
+  visitorIdHash String
+  firstSeenAt DateTime
+  lastSeenAt DateTime
+  visitCount Int @default(1)
+  firstIpHash String?
+  lastIpHash String?
+  userAgentHash String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  @@unique([siteId, visitorIdHash])
+  @@index([siteId])
+  @@index([siteId, lastSeenAt])
+  @@index([siteId, firstSeenAt])
+}
+
+model Session {
+  id String @id @default(uuid())
+  siteId String
+  visitorIdHash String
+  startedAt DateTime
+  lastActivityAt DateTime
+  endedAt DateTime?
+  pageCount Int @default(0)
+  entryPath String?
+  exitPath String?
+  referrer String?
+  source String?
+  medium String?
+  campaign String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageViews PageView[]
+  events Event[]
+  @@index([siteId, startedAt])
+  @@index([visitorIdHash])
+}
+
+model PageView {
+  id String @id @default(uuid())
+  eventId String
+  siteId String
+  visitorIdHash String
+  sessionId String
+  path String
+  fullUrl String?
+  referrer String?
+  source String?
+  medium String?
+  campaign String?
+  deviceType String
+  browser String?
+  browserVersion String?
+  os String?
+  osVersion String?
+  language String?
+  timezone String?
+  screenWidth Int?
+  screenHeight Int?
+  country String?
+  createdAt DateTime @default(now())
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@unique([siteId, eventId])
+  @@index([siteId, createdAt])
+  @@index([siteId, path])
+  @@index([visitorIdHash])
+  @@index([sessionId])
+}
+
+model Event {
+  id String @id @default(uuid())
+  eventId String
+  siteId String
+  visitorIdHash String
+  sessionId String?
+  name String
+  properties Json?
+  createdAt DateTime @default(now())
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  @@unique([siteId, eventId])
+  @@index([siteId, createdAt])
+}

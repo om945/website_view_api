@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Website Tracker Test</title>
+</head>
+<body>
+  <h1>Website Tracker Test</h1>
+  <p>Replace the site key below with one created through the authenticated site API.</p>
+  <script src="http://localhost:3000/script.js" data-site="YOUR_TEST_SITE_KEY" data-debug="true" defer></script>
+  <script>
+    window.navigateSpa = function (url) {
+      window.history.pushState({}, "", url);
+    };
+  </script>
+</body>
+</html>
