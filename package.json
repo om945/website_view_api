@@ -11,6 +11,7 @@
     "db:generate": "bun x prisma generate",
     "db:migrate": "bun x prisma migrate dev",
     "db:deploy": "bun x prisma migrate deploy",
+    "db:migrate:deploy": "bun x prisma migrate deploy",
     "db:seed": "bun prisma/seed.ts",
     "config:check": "bun src/scripts/config-check.ts",
     "retention:cleanup": "bun src/jobs/retention.ts",

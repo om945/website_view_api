@@ -1,5 +1,8 @@
 const bool = (value: string | undefined) => value === "true";
-const numberFromEnv = (value: string | undefined, fallback: number) => Number(value ?? fallback);
+const numberFromEnv = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 function requiredInProduction(name: string, value: string) {
   if (config.nodeEnv === "production" && !value) throw new Error(`${name} is required in production`);
@@ -7,6 +10,7 @@ function requiredInProduction(name: string, value: string) {
 
 export const config = {
   nodeEnv: Bun.env.NODE_ENV ?? "development",
+  host: Bun.env.HOST ?? "0.0.0.0",
   port: numberFromEnv(Bun.env.PORT, 3000),
   databaseUrl: Bun.env.DATABASE_URL ?? "postgresql://analytics:analytics@localhost:5432/analytics",
   redisUrl: Bun.env.REDIS_URL ?? "redis://localhost:6379",

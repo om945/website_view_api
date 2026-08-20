@@ -8,6 +8,7 @@ import { redis } from "../src/redis/redis";
 import { touchPresence, activeCount, presenceKey } from "../src/redis/presence";
 import { rateLimit } from "../src/redis/rate-limit";
 import { config } from "../src/config/config";
+import { corsAllows } from "../src/utils/cors";
 
 const BASE = process.env.TEST_BASE_URL ?? "http://localhost:3100";
 const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36";
@@ -120,6 +121,17 @@ afterAll(async () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("unit: utils", () => {
+  test("development CORS allows dynamic localhost dashboard ports only", () => {
+    expect(corsAllows(new Request("http://localhost:3000/api/v1/auth/me", { headers: { origin: "http://localhost:56541" } }))).toBe(true);
+    expect(corsAllows(new Request("http://localhost:3000/api/v1/auth/me", { headers: { origin: "http://127.0.0.1:50000" } }))).toBe(true);
+    expect(corsAllows(new Request("http://localhost:3000/api/v1/auth/me", { headers: { origin: "https://evil.example" } }))).toBe(false);
+  });
+
+  test("public routes may be read cross-origin without widening dashboard CORS", () => {
+    expect(corsAllows(new Request("http://localhost:3000/api/v1/public/sites/site_demo/visitor-count", { headers: { origin: "https://developer.example" } }))).toBe(true);
+    expect(corsAllows(new Request("http://localhost:3000/api/v1/stats?siteKey=site_demo", { headers: { origin: "https://developer.example" } }))).toBe(false);
+  });
+
   test("hash is deterministic and HMAC-bound to secret", () => {
     expect(hash("visitor")).toBe(hash("visitor"));
     expect(hash("visitor")).not.toBe(hash("other"));

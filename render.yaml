@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: website-view-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: VISITOR_HASH_SECRET
+        sync: false
+      - key: TRACKER_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: TRUSTED_PROXY
+        value: "true"

@@ -4,10 +4,13 @@ import { redis } from "./redis/redis";
 import { config } from "./config/config";
 import { logger } from "./utils/logger";
 
-const server = app.listen({ port: config.port, maxRequestBodySize: config.maxRequestBodyBytes });
-logger.info("server.started", { port: server.server?.port ?? config.port, environment: config.nodeEnv });
+const server = app.listen({ hostname: config.host, port: config.port, maxRequestBodySize: config.maxRequestBodyBytes });
+logger.info("server.started", { host: config.host, port: server.server?.port ?? config.port, environment: config.nodeEnv });
 
+let shuttingDown = false;
 async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info("server.shutdown", { signal });
   server.stop();
   await prisma.$disconnect();
