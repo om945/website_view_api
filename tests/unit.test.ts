@@ -9,7 +9,7 @@ import { touchPresence, activeCount, presenceKey } from "../src/redis/presence";
 import { rateLimit } from "../src/redis/rate-limit";
 import { config } from "../src/config/config";
 
-const BASE = process.env.TEST_BASE_URL ?? "http://localhost:3000";
+const BASE = process.env.TEST_BASE_URL ?? "http://localhost:3100";
 const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36";
 const MOBILE_UA  = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
 const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -69,6 +69,11 @@ async function trackPV(siteKey: string, visitorId: string, path = "/", extra: Re
     headers: { "content-type": "application/json", "user-agent": DESKTOP_UA },
     body: JSON.stringify({ siteKey, visitorId, path, ...extra }),
   });
+}
+
+async function getPublicCount(siteKey: string, headers: Record<string, string> = {}) {
+  const res = await fetch(`${BASE}/api/v1/public/sites/${siteKey}/visitor-count`, { headers });
+  return { res, body: await res.json() as { totalVisitors: number; activeVisitors: number; error?: { code: string } } };
 }
 
 async function getStats(siteKey: string, cookie: string, range?: string) {
@@ -291,7 +296,89 @@ describe("tracking: session management", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 4. Statistics: new vs returning (direct DB inserts for time control)
+// 4. Public visitor counters
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("public visitor counters", () => {
+  test.if(infraOk)("empty site returns zero visitors without authentication", async () => {
+    const ctx = await setupSite();
+    const { res, body } = await getPublicCount(ctx.siteKey);
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ totalVisitors: 0, activeVisitors: 0 });
+  });
+
+  test.if(infraOk)("one visitor is counted once", async () => {
+    const ctx = await setupSite();
+    await trackPV(ctx.siteKey, randomUUID() + randomUUID());
+    const { body } = await getPublicCount(ctx.siteKey);
+    expect(body.totalVisitors).toBe(1);
+  });
+
+  test.if(infraOk)("multiple page views by one visitor do not inflate totalVisitors", async () => {
+    const ctx = await setupSite();
+    const visitorId = randomUUID() + randomUUID();
+    await trackPV(ctx.siteKey, visitorId, "/one");
+    await trackPV(ctx.siteKey, visitorId, "/two");
+    await trackPV(ctx.siteKey, visitorId, "/three");
+    const { body } = await getPublicCount(ctx.siteKey);
+    expect(body.totalVisitors).toBe(1);
+  });
+
+  test.if(infraOk)("multiple visitors are counted distinctly", async () => {
+    const ctx = await setupSite();
+    await Promise.all([
+      trackPV(ctx.siteKey, randomUUID() + randomUUID()),
+      trackPV(ctx.siteKey, randomUUID() + randomUUID()),
+      trackPV(ctx.siteKey, randomUUID() + randomUUID()),
+    ]);
+    const { body } = await getPublicCount(ctx.siteKey);
+    expect(body.totalVisitors).toBe(3);
+  });
+
+  test.if(infraOk)("activeVisitors uses live Redis presence", async () => {
+    const ctx = await setupSite();
+    const visitorId = randomUUID() + randomUUID();
+    await trackPV(ctx.siteKey, visitorId);
+    const { body } = await getPublicCount(ctx.siteKey);
+    expect(body.activeVisitors).toBeGreaterThanOrEqual(1);
+  });
+
+  test.if(infraOk)("expired Redis presence is not active", async () => {
+    const ctx = await setupSite();
+    const expiredHash = hash(randomUUID());
+    await redis.zadd(presenceKey(ctx.siteId), Date.now() - 1, expiredHash);
+    const { body } = await getPublicCount(ctx.siteKey);
+    expect(body.activeVisitors).toBe(0);
+    await redis.del(presenceKey(ctx.siteId));
+  });
+
+  test.if(infraOk)("multiple active visitors are counted from Redis", async () => {
+    const ctx = await setupSite();
+    const future = Date.now() + 60_000;
+    await redis.zadd(presenceKey(ctx.siteId), future, hash(randomUUID()), future, hash(randomUUID()));
+    const { body } = await getPublicCount(ctx.siteKey);
+    expect(body.activeVisitors).toBe(2);
+    await redis.del(presenceKey(ctx.siteId));
+  });
+
+  test.if(infraOk)("unknown site returns safe 404 and no private data", async () => {
+    const { res, body } = await getPublicCount(`site_${randomUUID().replaceAll("-", "")}`);
+    expect(res.status).toBe(404);
+    expect(body.error?.code).toBe("SITE_NOT_FOUND");
+    expect(body).not.toHaveProperty("siteId");
+  });
+
+  test.if(infraOk)("public response allows cross-origin reads and is not long-cached", async () => {
+    const ctx = await setupSite();
+    const { res } = await getPublicCount(ctx.siteKey, { origin: "https://developer-site.example" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. Statistics: new vs returning (direct DB inserts for time control)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("statistics: new vs returning (24h)", () => {

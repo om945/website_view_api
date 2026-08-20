@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 test.describe('Tracker Script Behavior', () => {
   let siteKey: string;
   let htmlContent: string;
-  const TEST_URL = 'http://localhost:3000/test.html';
+  const TEST_URL = 'http://localhost:3100/test.html';
 
   test.beforeAll(async () => {
     siteKey = `test_site_${randomUUID().replace(/-/g, '')}`;
@@ -16,7 +16,7 @@ test.describe('Tracker Script Behavior', () => {
       </head>
       <body>
         <h1>Tracker Test Page</h1>
-        <script src="http://localhost:3000/script.js" data-site="${siteKey}" data-debug="true"></script>
+        <script src="http://localhost:3100/script.js" data-site="${siteKey}" data-debug="true"></script>
         <script>
           window.navigateSpa = function(url) {
             window.history.pushState({}, '', url);

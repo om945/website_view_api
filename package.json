@@ -7,7 +7,7 @@
     "build": "bun build ./src/server.ts --outdir ./dist --target bun",
     "start": "bun src/server.ts",
     "typecheck": "bun x tsc --noEmit",
-    "test": "bun test --env-file .env.test --path-ignore-patterns=tests/browser.test.ts tests/unit.test.ts",
+    "test": "bun scripts/run-tests.ts",
     "db:generate": "bun x prisma generate",
     "db:migrate": "bun x prisma migrate dev",
     "db:deploy": "bun x prisma migrate deploy",
@@ -15,8 +15,9 @@
     "config:check": "bun src/scripts/config-check.ts",
     "retention:cleanup": "bun src/jobs/retention.ts",
     "load:test": "bun scripts/load-test.ts",
+    "test:server": "bun --no-env-file src/test-server.ts",
     "test:browser": "playwright test tests/browser.test.ts",
-    "test:all": "bun test --env-file .env.test --path-ignore-patterns=tests/browser.test.ts tests/unit.test.ts && playwright test tests/browser.test.ts"
+    "test:all": "bun run test && bun run test:browser"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.3.3",

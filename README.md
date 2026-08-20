@@ -82,6 +82,21 @@ Public ingestion: `POST /api/v1/track`, `POST /api/v1/events`, and `WS /ws/track
 
 Authenticated analytics: `GET /api/v1/stats?siteKey=...&range=24h|7d|30d` and `GET /api/v1/stats/pages?...`.
 
+Public visitor counter: `GET /api/v1/public/sites/:siteKey/visitor-count` requires no developer authentication and returns only the two public counters:
+
+```bash
+curl https://api.yourdomain.com/api/v1/public/sites/site_abc123/visitor-count
+```
+
+```json
+{
+  "totalVisitors": 12840,
+  "activeVisitors": 27
+}
+```
+
+`totalVisitors` is the count of distinct anonymous visitors recorded for the site. `activeVisitors` is the current distinct visitor count from Redis presence and expires according to the existing heartbeat/TTL configuration. The endpoint returns `404` for an unknown site and is protected by its dedicated public-read rate limit (`PUBLIC_STATS_RATE_LIMIT_WINDOW_SECONDS` and `PUBLIC_STATS_RATE_LIMIT_MAX_REQUESTS`, defaulting to 60 requests per minute).
+
 ## Privacy
 
 The browser ID is the primary anonymous identity and is HMAC-SHA-256 hashed before persistence. IP addresses and user agents are hashed; raw IPs are never returned. IP is only a secondary signal. The system does not collect form contents, keystrokes, GPS, private LAN IPs, hardware identifiers, advertising IDs, camera, microphone, or invasive fingerprints.
