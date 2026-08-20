@@ -26,7 +26,7 @@ export const config = {
   rateWindow: numberFromEnv(Bun.env.RATE_LIMIT_WINDOW_SECONDS, 60),
   rateMax: numberFromEnv(Bun.env.RATE_LIMIT_MAX_REQUESTS, 120),
   dashboardRateMax: numberFromEnv(Bun.env.DASHBOARD_RATE_LIMIT_MAX_REQUESTS, 60),
-  authRateMax: numberFromEnv(Bun.env.AUTH_RATE_LIMIT_MAX_REQUESTS, 10),
+  authRateMax: numberFromEnv(Bun.env.AUTH_RATE_LIMIT_MAX_REQUESTS, 30),
   publicStatsRateWindow: numberFromEnv(Bun.env.PUBLIC_STATS_RATE_LIMIT_WINDOW_SECONDS, 60),
   publicStatsRateMax: numberFromEnv(Bun.env.PUBLIC_STATS_RATE_LIMIT_MAX_REQUESTS, 60),
   activeTtl: numberFromEnv(Bun.env.ACTIVE_VISITOR_TTL_SECONDS, 45),
