@@ -20,7 +20,7 @@ export const config = {
   sessionSecret: Bun.env.SESSION_SECRET ?? "dev-session-secret-change-me",
   visitorHashSecret: Bun.env.VISITOR_HASH_SECRET ?? "dev-visitor-secret-change-me",
   trackerBaseUrl: Bun.env.TRACKER_BASE_URL ?? "http://localhost:3000",
-  corsOrigins: (Bun.env.CORS_ORIGINS ?? "*").split(",").map((value) => value.trim()),
+  corsOrigins: (Bun.env.CORS_ORIGINS ?? "*").split(",").map((value) => value.trim().replace(/\/$/, "")),
   trustedProxy: bool(Bun.env.TRUSTED_PROXY),
   sessionTtl: numberFromEnv(Bun.env.SESSION_TTL, 604800),
   rateWindow: numberFromEnv(Bun.env.RATE_LIMIT_WINDOW_SECONDS, 60),
