@@ -1,3 +1,5 @@
+import { isHttpsOrigin, isLocalDevelopmentOrigin } from "../utils/origin";
+
 const bool = (value: string | undefined) => value === "true";
 const numberFromEnv = (value: string | undefined, fallback: number) => {
   const parsed = Number(value ?? fallback);
@@ -21,6 +23,7 @@ export const config = {
   visitorHashSecret: Bun.env.VISITOR_HASH_SECRET ?? "dev-visitor-secret-change-me",
   trackerBaseUrl: Bun.env.TRACKER_BASE_URL ?? "http://localhost:3000",
   corsOrigins: (Bun.env.CORS_ORIGINS ?? "*").split(",").map((value) => value.trim().replace(/\/$/, "")),
+  allowLocalhostCorsInProduction: bool(Bun.env.ALLOW_LOCALHOST_CORS_IN_PRODUCTION),
   trustedProxy: bool(Bun.env.TRUSTED_PROXY),
   sessionTtl: numberFromEnv(Bun.env.SESSION_TTL, 604800),
   rateWindow: numberFromEnv(Bun.env.RATE_LIMIT_WINDOW_SECONDS, 60),
@@ -57,7 +60,11 @@ if (config.nodeEnv === "production") {
   }
   if (!config.googleRedirectUri.startsWith("https://") || !config.trackerBaseUrl.startsWith("https://")) throw new Error("Production public URLs must use HTTPS");
   if (!config.trustedProxy) throw new Error("TRUSTED_PROXY=true is required for production reverse-proxy deployments");
-  if (config.corsOrigins.length === 0 || config.corsOrigins.includes("*") || config.corsOrigins.some((origin) => !origin.startsWith("https://"))) {
-    throw new Error("CORS_ORIGINS must contain explicit HTTPS dashboard origins in production");
+  if (
+    config.corsOrigins.length === 0 ||
+    config.corsOrigins.includes("*") ||
+    config.corsOrigins.some((origin) => !isHttpsOrigin(origin) && !(config.allowLocalhostCorsInProduction && isLocalDevelopmentOrigin(origin)))
+  ) {
+    throw new Error("CORS_ORIGINS must contain explicit HTTPS dashboard origins in production, except localhost origins when ALLOW_LOCALHOST_CORS_IN_PRODUCTION=true");
   }
 }

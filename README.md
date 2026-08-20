@@ -113,7 +113,7 @@ The repository includes `render.yaml` for a Docker web service. Use the reposito
 - WebSockets: connect clients to `wss://<real-api-domain>/ws/track` after HTTPS is configured.
 - Production OAuth callback: `https://<real-api-domain>/api/v1/auth/google/callback`.
 
-Set the `DATABASE_URL`, `REDIS_URL`, OAuth, secrets, `TRACKER_BASE_URL`, and explicit `CORS_ORIGINS` values in Render’s environment settings. Run `bun run db:migrate:deploy` against the production database as a release/migration step before serving traffic; do not use `db push`.
+Set the `DATABASE_URL`, `REDIS_URL`, OAuth, secrets, `TRACKER_BASE_URL`, and explicit `CORS_ORIGINS` values in Render’s environment settings. `CORS_ORIGINS` must include the deployed dashboard origin, for example `https://dashboard.example.com`. If you are intentionally testing the deployed Render API from a local Flutter Web dashboard, temporarily set `ALLOW_LOCALHOST_CORS_IN_PRODUCTION=true`; that switch allows dynamic `http://localhost:<port>` and `http://127.0.0.1:<port>` origins without reflecting arbitrary remote domains. Run `bun run db:migrate:deploy` against the production database as a release/migration step before serving traffic; do not use `db push`.
 
 ```text
 Internet → HTTPS reverse proxy → Bun/Elysia → PostgreSQL + Redis

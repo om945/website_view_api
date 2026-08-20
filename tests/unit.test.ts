@@ -8,7 +8,7 @@ import { redis } from "../src/redis/redis";
 import { touchPresence, activeCount, presenceKey } from "../src/redis/presence";
 import { rateLimit } from "../src/redis/rate-limit";
 import { config } from "../src/config/config";
-import { corsAllows } from "../src/utils/cors";
+import { corsAllows, corsOriginAllowed } from "../src/utils/cors";
 
 const BASE = process.env.TEST_BASE_URL ?? "http://localhost:3100";
 const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36";
@@ -125,6 +125,14 @@ describe("unit: utils", () => {
     expect(corsAllows(new Request("http://localhost:3000/api/v1/auth/me", { headers: { origin: "http://localhost:56541" } }))).toBe(true);
     expect(corsAllows(new Request("http://localhost:3000/api/v1/auth/me", { headers: { origin: "http://127.0.0.1:50000" } }))).toBe(true);
     expect(corsAllows(new Request("http://localhost:3000/api/v1/auth/me", { headers: { origin: "https://evil.example" } }))).toBe(false);
+  });
+
+  test("production CORS allows localhost dashboard origins only when explicitly enabled", () => {
+    const base = { allowedOrigins: ["https://dashboard.example.com"], nodeEnv: "production" };
+
+    expect(corsOriginAllowed("http://localhost:56541", "/api/v1/auth/me", { ...base, allowLocalhostCorsInProduction: false })).toBe(false);
+    expect(corsOriginAllowed("http://localhost:56541", "/api/v1/auth/me", { ...base, allowLocalhostCorsInProduction: true })).toBe(true);
+    expect(corsOriginAllowed("https://evil.example", "/api/v1/auth/me", { ...base, allowLocalhostCorsInProduction: true })).toBe(false);
   });
 
   test("public routes may be read cross-origin without widening dashboard CORS", () => {
