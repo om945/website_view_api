@@ -55,7 +55,7 @@ app.onAfterHandle(({ request, set }) => {
   if (new URL(request.url).pathname !== "/script.js" && !set.headers["cache-control"]) set.headers["cache-control"] = "no-store";
   logger.info("http.request", { route: new URL(request.url).pathname, status: set.status ?? 200, requestId: requestId(request) });
 });
-app.get("/health",()=>({ok:true,status:"alive"}));
+app.get("/health",()=>({ok:true}));
 app.get("/ready",async({set})=>{try{await prisma.$queryRaw`SELECT 1`;await redis.ping();return {ok:true,status:"ready"};}catch{set.status=503;return error("NOT_READY","Dependencies unavailable",503);}});
 app.get("/script.js",()=>new Response(Bun.file("tracking/script.js"),{headers:{"content-type":"application/javascript; charset=utf-8","cache-control":"public,max-age=300"}}));
 
@@ -89,5 +89,4 @@ app.ws("/ws/track",{maxPayloadLength:2048,open:ws=>ws.send(JSON.stringify({ok:tr
       if(!s)return;
       await touchPresence(s.id,hash(visitorId));
       ws.send(JSON.stringify({ok:true,type:"presence_ack"}));}catch{}}});
-app.get("/health", () => ({ ok: true }));
 export { app };
