@@ -19,6 +19,7 @@ export const config = {
   googleClientId: Bun.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: Bun.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri: Bun.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/api/v1/auth/google/callback",
+  authSuccessRedirectUrl: Bun.env.AUTH_SUCCESS_REDIRECT_URL ?? "http://localhost:3000/",
   sessionSecret: Bun.env.SESSION_SECRET ?? "dev-session-secret-change-me",
   visitorHashSecret: Bun.env.VISITOR_HASH_SECRET ?? "dev-visitor-secret-change-me",
   trackerBaseUrl: Bun.env.TRACKER_BASE_URL ?? "http://localhost:3000",
@@ -47,6 +48,7 @@ if (config.nodeEnv === "production") {
     GOOGLE_CLIENT_ID: config.googleClientId,
     GOOGLE_CLIENT_SECRET: config.googleClientSecret,
     GOOGLE_REDIRECT_URI: config.googleRedirectUri,
+    AUTH_SUCCESS_REDIRECT_URL: config.authSuccessRedirectUrl,
     SESSION_SECRET: config.sessionSecret,
     VISITOR_HASH_SECRET: config.visitorHashSecret,
     TRACKER_BASE_URL: config.trackerBaseUrl,
@@ -58,7 +60,8 @@ if (config.nodeEnv === "production") {
   if (config.databaseUrl.includes("localhost") || config.redisUrl.includes("localhost") || config.databaseUrl.includes("analytics:analytics")) {
     throw new Error("Production DATABASE_URL and REDIS_URL must not use local development defaults");
   }
-  if (!config.googleRedirectUri.startsWith("https://") || !config.trackerBaseUrl.startsWith("https://")) throw new Error("Production public URLs must use HTTPS");
+  if (!config.googleRedirectUri.startsWith("https://") || !config.authSuccessRedirectUrl.startsWith("https://") || !config.trackerBaseUrl.startsWith("https://")) throw new Error("Production public URLs must use HTTPS");
+  if (!config.corsOrigins.includes(new URL(config.authSuccessRedirectUrl).origin)) throw new Error("AUTH_SUCCESS_REDIRECT_URL must point to an origin listed in CORS_ORIGINS");
   if (!config.trustedProxy) throw new Error("TRUSTED_PROXY=true is required for production reverse-proxy deployments");
   if (
     config.corsOrigins.length === 0 ||
