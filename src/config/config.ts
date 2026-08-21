@@ -19,7 +19,7 @@ export const config = {
   googleClientId: Bun.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: Bun.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri: Bun.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/api/v1/auth/google/callback",
-  authSuccessRedirectUrl: Bun.env.AUTH_SUCCESS_REDIRECT_URL ?? "http://localhost:3000/",
+  authSuccessRedirectUrl: Bun.env.AUTH_SUCCESS_REDIRECT_URL ?? "http://localhost:3000/dashboard",
   sessionSecret: Bun.env.SESSION_SECRET ?? "dev-session-secret-change-me",
   visitorHashSecret: Bun.env.VISITOR_HASH_SECRET ?? "dev-visitor-secret-change-me",
   trackerBaseUrl: Bun.env.TRACKER_BASE_URL ?? "http://localhost:3000",
