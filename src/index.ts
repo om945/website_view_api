@@ -12,12 +12,12 @@ import { clientIp } from "./utils/ip";
 import { domainOk, normalizeDomain } from "./utils/domain";
 import { hash, newKey } from "./utils/hashing";
 import { parseUserAgent } from "./utils/user-agent";
-import { apiError } from "./utils/errors";
+import { apiError, userFacingMessage, type ApiErrorCode } from "./utils/errors";
 import { logger } from "./utils/logger";
 import { requestId } from "./middleware/request-context";
 import { securityHeaders } from "./middleware/security";
 import { getPublicVisitorCount } from "./services/public-stats.service";
-import { corsAllows } from "./utils/cors";
+import { corsAllows, corsOriginAllowed } from "./utils/cors";
 import { rateLimitPolicy } from "./utils/rate-limit-policy";
 
 const error = apiError;
@@ -110,11 +110,7 @@ async function siteFor(
   if (!user) {
     return {
       ok: false,
-      error: error(
-        "UNAUTHENTICATED",
-        "Authentication required",
-        401,
-      ),
+      error: error("UNAUTHENTICATED", userFacingMessage("UNAUTHENTICATED"), 401),
     };
   }
 
@@ -127,18 +123,14 @@ async function siteFor(
   if (!site) {
     return {
       ok: false,
-      error: error("NOT_FOUND", "Site not found", 404),
+      error: error("NOT_FOUND", "Website not found. It may have been deleted.", 404),
     };
   }
 
   if (site.userId !== user.id) {
     return {
       ok: false,
-      error: error(
-        "FORBIDDEN",
-        "You do not own this site",
-        403,
-      ),
+      error: error("FORBIDDEN", userFacingMessage("FORBIDDEN"), 403),
     };
   }
 
@@ -301,30 +293,32 @@ const app = new Elysia()
       }
     }
   })
-  .onError(({ code, error: err, set }) => {
-    console.error(
-      JSON.stringify({
-        code,
-        message:
-          err instanceof Error ? err.message : "request error",
-      }),
-    );
+  .onError(({ code, error: err, set, request }) => {
+    logger.error("http.error", {
+      code,
+      message: err instanceof Error ? err.name : "request error",
+    });
 
     set.status = code === "VALIDATION" ? 400 : 500;
 
-    return error(
-      code === "VALIDATION"
-        ? "INVALID_REQUEST"
-        : "INTERNAL_ERROR",
-      code === "VALIDATION"
-        ? "Invalid request"
-        : config.nodeEnv === "production"
-          ? "Internal server error"
-          : err instanceof Error
-            ? err.message
-            : "Internal server error",
-      set.status as number,
-    );
+    return {
+      error: {
+        code:
+          code === "VALIDATION"
+            ? "VALIDATION_ERROR"
+            : "INTERNAL_ERROR",
+        message:
+          code === "VALIDATION"
+            ? "Invalid request parameters"
+            : config.nodeEnv === "production"
+              ? "Something went wrong while processing your request."
+              : err instanceof Error
+                ? err.message
+                : "Internal server error",
+        status: set.status as number,
+        requestId: requestId(request),
+      },
+    };
   });
 
 app.onRequest(({ request, set }) => {
@@ -351,13 +345,35 @@ app.onBeforeHandle(({ request }) => {
   }
 });
 
-app.onError(({ request, set }) => {
+app.onRequest(({ request, set }) => {
   const origin = request.headers.get("origin");
 
   if (origin && corsAllows(request)) {
     set.headers["access-control-allow-origin"] = origin;
     set.headers["access-control-allow-credentials"] = "true";
     set.headers["vary"] = "Origin";
+  }
+});
+
+app.mapResponse(({ response, request, set }) => {
+  if (response && typeof response === "object" && "error" in response) {
+    const errObj = (response as any).error;
+    const statusCode = errObj.status ?? set.status ?? 400;
+    set.status = statusCode;
+    
+    return new Response(
+      JSON.stringify({
+        ...response,
+        error: {
+          ...errObj,
+          requestId: requestId(request),
+        },
+      }),
+      {
+        status: statusCode,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 });
 
@@ -372,12 +388,49 @@ app.onAfterHandle(({ request, set }) => {
   ) {
     set.headers["cache-control"] = "no-store";
   }
-
   logger.info("http.request", {
     route: new URL(request.url).pathname,
     status: set.status ?? 200,
     requestId: requestId(request),
   });
+});
+
+app.onBeforeHandle(({ request, set }) => {
+  const method = request.method;
+  const url = new URL(request.url);
+
+
+  if (
+    ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
+    (url.pathname.startsWith("/api/v1/sites") ||
+      url.pathname === "/api/v1/auth/logout")
+  ) {
+    const originHeader = request.headers.get("origin");
+    const refererHeader = request.headers.get("referer");
+    
+    let originToVerify = originHeader;
+    if (!originToVerify && refererHeader) {
+      try {
+        originToVerify = new URL(refererHeader).origin;
+      } catch {}
+    }
+
+    if (!originToVerify) {
+      set.status = 403;
+      return error("CSRF_FAILED", userFacingMessage("CSRF_FAILED"), 403);
+    }
+
+    const isAllowed = corsOriginAllowed(originToVerify, url.pathname, {
+      allowedOrigins: config.corsOrigins,
+      nodeEnv: config.nodeEnv,
+      allowLocalhostCorsInProduction: config.allowLocalhostCorsInProduction,
+    });
+
+    if (!isAllowed) {
+      set.status = 403;
+      return error("CSRF_FAILED", userFacingMessage("CSRF_FAILED"), 403);
+    }
+  }
 });
 
 app.get("/health", () => ({
@@ -395,12 +448,7 @@ app.get("/ready", async ({ set }) => {
     };
   } catch {
     set.status = 503;
-
-    return error(
-      "NOT_READY",
-      "Dependencies unavailable",
-      503,
-    );
+    return error("SERVICE_UNAVAILABLE", userFacingMessage("SERVICE_UNAVAILABLE"), 503);
   }
 });
 
@@ -419,12 +467,7 @@ app.get(
 app.get("/api/v1/auth/google", ({ query, set }) => {
   if (!config.googleClientId) {
     set.status = 503;
-
-    return error(
-      "AUTH_NOT_CONFIGURED",
-      "Google authentication is not configured",
-      503,
-    );
+    return error("AUTH_NOT_CONFIGURED", userFacingMessage("AUTH_NOT_CONFIGURED"), 503);
   }
 
   const configured = new URL(config.authSuccessRedirectUrl);
@@ -481,11 +524,7 @@ app.get(
       });
 
       set.status = 400;
-
-      return error(
-        "INVALID_OAUTH_STATE",
-        "Invalid OAuth state",
-      );
+      return error("OAUTH_STATE_INVALID", userFacingMessage("OAUTH_STATE_INVALID"), 400);
     }
 
     const [baseState, redirectEncoded] = (
@@ -502,11 +541,7 @@ app.get(
       });
 
       set.status = 400;
-
-      return error(
-        "INVALID_OAUTH_STATE",
-        "Invalid OAuth state",
-      );
+      return error("OAUTH_STATE_INVALID", userFacingMessage("OAUTH_STATE_INVALID"), 400);
     }
 
     const redirectUrl = resolveAuthRedirect(redirectEncoded);
@@ -540,12 +575,7 @@ app.get(
       });
 
       set.status = 401;
-
-      return error(
-        "AUTH_FAILED",
-        "Google authentication failed",
-        401,
-      );
+      return error("OAUTH_FAILED", userFacingMessage("OAUTH_FAILED"), 401);
     }
 
     let c;
@@ -567,12 +597,7 @@ app.get(
       });
 
       set.status = 401;
-
-      return error(
-        "AUTH_FAILED",
-        "Invalid Google identity",
-        401,
-      );
+      return error("OAUTH_FAILED", userFacingMessage("OAUTH_FAILED"), 401);
     }
 
     if (
@@ -585,12 +610,7 @@ app.get(
       });
 
       set.status = 401;
-
-      return error(
-        "AUTH_FAILED",
-        "Invalid Google identity",
-        401,
-      );
+      return error("OAUTH_FAILED", userFacingMessage("OAUTH_FAILED"), 401);
     }
 
     const u = await prisma.user.upsert({
@@ -674,12 +694,7 @@ app.get(
 
     if (!u) {
       set.status = 401;
-
-      return error(
-        "UNAUTHENTICATED",
-        "Authentication required",
-        401,
-      );
+      return error("UNAUTHENTICATED", userFacingMessage("UNAUTHENTICATED"), 401);
     }
 
     return {
@@ -698,21 +713,12 @@ app.post(
 
     if (!u) {
       set.status = 401;
-
-      return error(
-        "UNAUTHENTICATED",
-        "Authentication required",
-        401,
-      );
+      return error("UNAUTHENTICATED", userFacingMessage("UNAUTHENTICATED"), 401);
     }
 
     if (!domainOk(body.domain)) {
       set.status = 400;
-
-      return error(
-        "INVALID_DOMAIN",
-        "Invalid domain",
-      );
+      return error("INVALID_DOMAIN", userFacingMessage("INVALID_DOMAIN"), 400);
     }
 
     set.status = 201;
@@ -778,32 +784,17 @@ app.get(
 
     if (!u) {
       set.status = 401;
-
-      return error(
-        "UNAUTHENTICATED",
-        "Authentication required",
-        401,
-      );
+      return error("UNAUTHENTICATED", userFacingMessage("UNAUTHENTICATED"), 401);
     }
 
     if (!s) {
       set.status = 404;
-
-      return error(
-        "NOT_FOUND",
-        "Site not found",
-        404,
-      );
+      return error("NOT_FOUND", "Website not found. It may have been deleted.", 404);
     }
 
     if (s.userId !== u.id) {
       set.status = 403;
-
-      return error(
-        "FORBIDDEN",
-        "You do not own this site",
-        403,
-      );
+      return error("FORBIDDEN", userFacingMessage("FORBIDDEN"), 403);
     }
 
     return s;
@@ -822,41 +813,22 @@ app.patch(
 
     if (!u) {
       set.status = 401;
-
-      return error(
-        "UNAUTHENTICATED",
-        "Authentication required",
-        401,
-      );
+      return error("UNAUTHENTICATED", userFacingMessage("UNAUTHENTICATED"), 401);
     }
 
     if (!s) {
       set.status = 404;
-
-      return error(
-        "NOT_FOUND",
-        "Site not found",
-        404,
-      );
+      return error("NOT_FOUND", "Website not found. It may have been deleted.", 404);
     }
 
     if (s.userId !== u.id) {
       set.status = 403;
-
-      return error(
-        "FORBIDDEN",
-        "You do not own this site",
-        403,
-      );
+      return error("FORBIDDEN", userFacingMessage("FORBIDDEN"), 403);
     }
 
     if (body.domain && !domainOk(body.domain)) {
       set.status = 400;
-
-      return error(
-        "INVALID_DOMAIN",
-        "Invalid domain",
-      );
+      return error("INVALID_DOMAIN", userFacingMessage("INVALID_DOMAIN"), 400);
     }
 
     return prisma.site.update({
@@ -901,32 +873,17 @@ app.delete(
 
     if (!u) {
       set.status = 401;
-
-      return error(
-        "UNAUTHENTICATED",
-        "Authentication required",
-        401,
-      );
+      return error("UNAUTHENTICATED", userFacingMessage("UNAUTHENTICATED"), 401);
     }
 
     if (!s) {
       set.status = 404;
-
-      return error(
-        "NOT_FOUND",
-        "Site not found",
-        404,
-      );
+      return error("NOT_FOUND", "Website not found. It may have been deleted.", 404);
     }
 
     if (s.userId !== u.id) {
       set.status = 403;
-
-      return error(
-        "FORBIDDEN",
-        "You do not own this site",
-        403,
-      );
+      return error("FORBIDDEN", userFacingMessage("FORBIDDEN"), 403);
     }
 
     await prisma.site.delete({
@@ -951,10 +908,7 @@ app.post(
     });
 
     if (!site) {
-      return error(
-        "INVALID_SITE_KEY",
-        "Invalid site key",
-      );
+      return { ok: true };
     }
 
     const vh = hash(body.visitorId);
@@ -1143,12 +1097,7 @@ app.post(
     });
 
     if (!site) {
-      set.status = 400;
-
-      return error(
-        "INVALID_SITE_KEY",
-        "Invalid site key",
-      );
+      return { ok: true };
     }
 
     const visitorIdHash = hash(body.visitorId);
@@ -1200,12 +1149,7 @@ app.get(
 
     if (!counts) {
       set.status = 404;
-
-      return error(
-        "SITE_NOT_FOUND",
-        "Site not found",
-        404,
-      );
+      return error("NOT_FOUND", "Website not found. It may have been deleted.", 404);
     }
 
     set.headers["cache-control"] = "no-cache";
@@ -1415,7 +1359,7 @@ app.ws("/ws/track", {
 
   message: async (ws, message) => {
     try {
-      // Elysia auto-parses JSON frames — message may already be an object.
+
       const obj: Record<string, unknown> =
         typeof message === "string"
           ? JSON.parse(message)

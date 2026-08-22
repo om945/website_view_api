@@ -24,33 +24,34 @@ export const config = {
 
   databaseUrl:
     Bun.env.DATABASE_URL ??
-    "postgresql://analytics:analytics@localhost:5432/analytics",
+    (Bun.env.NODE_ENV === "production" ? "" : "postgresql://analytics:analytics@localhost:5432/analytics"),
 
-  redisUrl: Bun.env.REDIS_URL ?? "redis://localhost:6379",
+  redisUrl: Bun.env.REDIS_URL ?? (Bun.env.NODE_ENV === "production" ? "" : "redis://localhost:6379"),
 
   googleClientId: Bun.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: Bun.env.GOOGLE_CLIENT_SECRET ?? "",
 
   googleRedirectUri:
     Bun.env.GOOGLE_REDIRECT_URI ??
-    "http://localhost:3000/api/v1/auth/google/callback",
+    (Bun.env.NODE_ENV === "production" ? "" : "http://localhost:3000/api/v1/auth/google/callback"),
 
   authSuccessRedirectUrl:
     Bun.env.AUTH_SUCCESS_REDIRECT_URL ??
-    "http://localhost:3000/dashboard",
+    (Bun.env.NODE_ENV === "production" ? "" : "http://localhost:3000/dashboard"),
 
   sessionSecret:
-    Bun.env.SESSION_SECRET ?? "dev-session-secret-change-me",
+    Bun.env.SESSION_SECRET ?? (Bun.env.NODE_ENV === "production" ? "" : "dev-session-secret-change-me"),
 
   visitorHashSecret:
-    Bun.env.VISITOR_HASH_SECRET ?? "dev-visitor-secret-change-me",
+    Bun.env.VISITOR_HASH_SECRET ?? (Bun.env.NODE_ENV === "production" ? "" : "dev-visitor-secret-change-me"),
 
   trackerBaseUrl:
-    Bun.env.TRACKER_BASE_URL ?? "http://localhost:3000",
+    Bun.env.TRACKER_BASE_URL ?? (Bun.env.NODE_ENV === "production" ? "" : "http://localhost:3000"),
 
-  corsOrigins: (Bun.env.CORS_ORIGINS ?? "*")
+  corsOrigins: (Bun.env.CORS_ORIGINS ?? "")
     .split(",")
-    .map((value) => value.trim().replace(/\/$/, "")),
+    .map((value) => value.trim().replace(/\/$/, ""))
+    .filter(Boolean),
 
   allowLocalhostCorsInProduction: bool(
     Bun.env.ALLOW_LOCALHOST_CORS_IN_PRODUCTION,
