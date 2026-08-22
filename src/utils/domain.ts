@@ -6,7 +6,13 @@ export function normalizeDomain(value: string) {
 export function domainOk(value: string) {
   try {
     const hostname = normalizeDomain(value);
-    return hostname.includes(".") && !hostname.includes(" ") && !hostname.includes("/");
+    const isLocalhost = hostname === "localhost";
+    const isIpv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    return (
+      (hostname.includes(".") || isLocalhost || isIpv4) &&
+      !hostname.includes(" ") &&
+      !hostname.includes("/")
+    );
   } catch {
     return false;
   }

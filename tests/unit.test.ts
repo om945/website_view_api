@@ -156,6 +156,10 @@ describe("unit: utils", () => {
   test("domainOk validates correctly", () => {
     expect(domainOk("https://example.com/path")).toBe(true);
     expect(domainOk("example.com")).toBe(true);
+    expect(domainOk("https://myapp.vercel.app")).toBe(true);
+    expect(domainOk("https://myapp.netlify.app/")).toBe(true);
+    expect(domainOk("http://localhost:3000")).toBe(true);
+    expect(domainOk("http://127.0.0.1:3000")).toBe(true);
     expect(domainOk("not a domain")).toBe(false);
     expect(domainOk("")).toBe(false);
   });
