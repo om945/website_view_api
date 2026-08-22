@@ -8,4 +8,5 @@ export const redis = new Redis(config.redisUrl, {
   retryStrategy: (attempt) => Math.min(attempt * 200, 2_000),
 });
 
-redis.on("error", (error) => logger.error("redis.connection_error", { message: error.message }));
+redis.on("error",
+  (error) => logger.error("redis.connection_error", { message: error.message }));
