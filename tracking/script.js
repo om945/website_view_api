@@ -2,6 +2,10 @@
   "use strict";
   try {
     var tag = document.currentScript;
+    if (!tag) {
+      var trackerScripts = document.querySelectorAll('script[data-site][src*="/script.js"]');
+      tag = trackerScripts.length ? trackerScripts[trackerScripts.length - 1] : null;
+    }
     function reportError(message, error) {
       if (typeof console !== "undefined" && console.error) {
         console.error("[ViziAPI] " + message, error || "");
