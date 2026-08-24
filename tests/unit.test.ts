@@ -597,7 +597,7 @@ describe("websocket: presence and validation", () => {
     });
     const parsed = JSON.parse(msg);
     expect(parsed.ok).toBe(true);
-    expect(parsed.heartbeatSeconds).toBe(15);
+    expect(parsed.heartbeatSeconds).toBe(30);
     ws.close();
   });
 

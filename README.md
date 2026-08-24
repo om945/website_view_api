@@ -57,7 +57,7 @@ Unit tests skip PostgreSQL/Redis cases when those services are unavailable. Star
 </script>
 ```
 
-Use `data-debug="true"` for diagnostic console messages. The SDK persists an anonymous first-party visitor ID, sends page views, supports `pushState`, `replaceState`, and `popstate`, persists scalar custom events through `/api/v1/events`, and maintains one WebSocket with a 15-second heartbeat and bounded reconnect backoff.
+Use `data-debug="true"` for diagnostic console messages. The SDK persists an anonymous first-party visitor ID, sends page views, supports `pushState`, `replaceState`, and `popstate`, persists scalar custom events through `/api/v1/events`, and maintains one WebSocket with a 30-second heartbeat and bounded reconnect backoff.
 
 ## Metrics
 
@@ -66,7 +66,7 @@ Use `data-debug="true"` for diagnostic console messages. The SDK persists an ano
 - Unique visitor: a distinct anonymous visitor hash with a page view in the selected range.
 - Session: continuous activity from one visitor; a new session begins after **2 hours of inactivity**.
 - Page view: one accepted, idempotent page-view event.
-- Active visitor: a visitor present in the Redis sorted set with an unexpired 45-second presence score.
+- Active visitor: a visitor present in the Redis sorted set with an unexpired 90-second presence score.
 
 Statistics use UTC server timestamps and PostgreSQL aggregation. Page results are capped at 100 paths.
 
@@ -110,7 +110,7 @@ The repository includes `render.yaml` for a Docker web service. Use the reposito
 - Build command: Docker build from `Dockerfile` (or `bun install --frozen-lockfile && bun run db:generate && bun run build` for a native Bun service).
 - Start command: `bun run start` (Docker uses the equivalent `bun dist/server.js`).
 - Health check: `/health`; `/ready` is available for dependency readiness checks.
-- WebSockets: connect clients to `wss://<real-api-domain>/ws/track` after HTTPS is configured.
+- WebSockets: connect clients to `wss://<real-api-domain>/ws/track` after HTTPS is configured. Tracker clients send a presence heartbeat every 30 seconds; dashboard clients subscribe with `{ "type": "subscribe", "siteKey": "..." }` and receive aggregate `presence_update` events.
 - Production OAuth callback: `https://<real-api-domain>/api/v1/auth/google/callback`.
 
 Set the `DATABASE_URL`, `REDIS_URL`, OAuth, secrets, `TRACKER_BASE_URL`, and explicit `CORS_ORIGINS` values in Render’s environment settings. `CORS_ORIGINS` must include the deployed dashboard origin, for example `https://dashboard.example.com`. If you are intentionally testing the deployed Render API from a local Flutter Web dashboard, temporarily set `ALLOW_LOCALHOST_CORS_IN_PRODUCTION=true`; that switch allows dynamic `http://localhost:<port>` and `http://127.0.0.1:<port>` origins without reflecting arbitrary remote domains. Run `bun run db:migrate:deploy` against the production database as a release/migration step before serving traffic; do not use `db push`.

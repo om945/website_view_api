@@ -12,16 +12,18 @@ const presenceKeyTtl = () =>
 export async function touchPresence(siteId: string, visitorHash: string) {
   try {
     const now = Date.now();
-    await redis.eval(
-      "redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]); return redis.call('EXPIRE', KEYS[1], ARGV[3]);",
+    return Number(await redis.eval(
+      "redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]); redis.call('EXPIRE', KEYS[1], ARGV[3]); return redis.call('ZCOUNT', KEYS[1], ARGV[4], '+inf');",
       1,
       presenceKey(siteId),
       now + config.activeTtl * 1000,
       visitorHash,
       presenceKeyTtl(),
-    );
+      now,
+    ));
   } catch (error) {
     logger.warn("presence.unavailable", { message: error instanceof Error ? error.message : "unknown" });
+    return 0;
   }
 }
 

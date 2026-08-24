@@ -14,6 +14,7 @@ import { hash, newKey } from "./utils/hashing";
 import { parseUserAgent } from "./utils/user-agent";
 import { apiError, userFacingMessage, type ApiErrorCode } from "./utils/errors";
 import { logger } from "./utils/logger";
+import { publishPresence, subscribePresence, unsubscribePresence } from "./realtime/presence-events";
 import { requestId } from "./middleware/request-context";
 import { securityHeaders } from "./middleware/security";
 import { getPublicVisitorCount } from "./services/public-stats.service";
@@ -1042,7 +1043,8 @@ app.post(
       }
     }
 
-    await touchPresence(site.id, vh);
+    const activeVisitors = await touchPresence(site.id, vh);
+    publishPresence(site.id, activeVisitors);
 
     return {
       ok: true,
@@ -1129,7 +1131,8 @@ app.post(
       },
     });
 
-    await touchPresence(site.id, visitorIdHash);
+    const activeVisitors = await touchPresence(site.id, visitorIdHash);
+    publishPresence(site.id, activeVisitors);
 
     return {
       ok: true,
@@ -1353,9 +1356,14 @@ app.ws("/ws/track", {
     ws.send(
       JSON.stringify({
         ok: true,
-        heartbeatSeconds: 15,
+        heartbeatSeconds: config.heartbeatIntervalSeconds,
       }),
     ),
+
+  close: (ws) => {
+    const subscription = (ws as typeof ws & { presenceSiteId?: string }).presenceSiteId;
+    if (subscription) unsubscribePresence(subscription, ws);
+  },
 
   message: async (ws, message) => {
     try {
@@ -1377,6 +1385,18 @@ app.ws("/ws/track", {
 
       const siteKey = obj["siteKey"];
       const visitorId = obj["visitorId"];
+
+      if (obj["type"] === "subscribe") {
+        if (typeof siteKey !== "string" || siteKey.length < 5 || siteKey.length > 100) return;
+        const site = await prisma.site.findUnique({ where: { siteKey }, select: { id: true } });
+        if (!site) return;
+        const socket = ws as typeof ws & { presenceSiteId?: string };
+        if (socket.presenceSiteId) unsubscribePresence(socket.presenceSiteId, ws);
+        socket.presenceSiteId = site.id;
+        subscribePresence(site.id, ws);
+        ws.send(JSON.stringify({ ok: true, type: "presence_subscribed" }));
+        return;
+      }
 
       if (
         typeof siteKey !== "string" ||
@@ -1404,10 +1424,11 @@ app.ws("/ws/track", {
         return;
       }
 
-      await touchPresence(
+      const activeVisitors = await touchPresence(
         s.id,
         hash(visitorId),
       );
+      publishPresence(s.id, activeVisitors);
 
       ws.send(
         JSON.stringify({

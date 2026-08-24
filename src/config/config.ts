@@ -93,12 +93,12 @@ export const config = {
 
   activeTtl: numberFromEnv(
     Bun.env.ACTIVE_VISITOR_TTL_SECONDS,
-    45,
+    90,
   ),
 
   heartbeatIntervalSeconds: numberFromEnv(
     Bun.env.HEARTBEAT_INTERVAL_SECONDS,
-    15,
+    30,
   ),
 
   dataRetentionDays: numberFromEnv(
