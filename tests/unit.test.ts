@@ -5,7 +5,6 @@ import { domainOk, normalizeDomain } from "../src/utils/domain";
 import { parseUserAgent } from "../src/utils/user-agent";
 import { prisma } from "../src/db/prisma";
 import { redis } from "../src/redis/redis";
-import { touchPresence, activeCount, presenceKey } from "../src/redis/presence";
 import { rateLimit } from "../src/redis/rate-limit";
 import { config } from "../src/config/config";
 import { corsAllows, corsOriginAllowed } from "../src/utils/cors";
@@ -74,7 +73,7 @@ async function trackPV(siteKey: string, visitorId: string, path = "/", extra: Re
 
 async function getPublicCount(siteKey: string, headers: Record<string, string> = {}) {
   const res = await fetch(`${BASE}/api/v1/public/sites/${siteKey}/visitor-count`, { headers });
-  return { res, body: await res.json() as { totalVisitors: number; activeVisitors: number; error?: { code: string } } };
+  return { res, body: await res.json() as { totalVisitors: number; error?: { code: string } } };
 }
 
 async function getStats(siteKey: string, cookie: string, range?: string) {
@@ -84,7 +83,7 @@ async function getStats(siteKey: string, cookie: string, range?: string) {
   const res = await fetch(url, { headers: { cookie } });
   return res.json() as Promise<{
     totalViews: number; uniqueVisitors: number; newVisitors: number;
-    returningVisitors: number; activeVisitors: number; sessions: number;
+    returningVisitors: number; sessions: number;
   }>;
 }
 
@@ -182,37 +181,8 @@ describe("unit: utils", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 2. Redis: presence and rate limiting
+// 2. Redis: rate limiting
 // ═══════════════════════════════════════════════════════════════════════════════
-
-describe("redis: presence", () => {
-  test.if(isRedisOk)("touchPresence adds member to sorted set", async () => {
-    const siteId = `ts_${randomUUID()}`;
-    const vh = hash(randomUUID());
-    await touchPresence(siteId, vh);
-    const count = await activeCount(siteId);
-    expect(count).toBeGreaterThanOrEqual(1);
-    await redis.del(presenceKey(siteId));
-  });
-
-  test.if(isRedisOk)("activeCount prunes expired entries", async () => {
-    const siteId = `ts_${randomUUID()}`;
-    const vh = hash(randomUUID());
-    await redis.zadd(presenceKey(siteId), Date.now() - 5000, vh);
-    const count = await activeCount(siteId);
-    expect(count).toBe(0);
-    await redis.del(presenceKey(siteId));
-  });
-
-  test.if(isRedisOk)("activeCount counts multiple live members", async () => {
-    const siteId = `ts_${randomUUID()}`;
-    const future = Date.now() + 60_000;
-    await redis.zadd(presenceKey(siteId), future, hash("v1"), future, hash("v2"), future, hash("v3"));
-    const count = await activeCount(siteId);
-    expect(count).toBe(3);
-    await redis.del(presenceKey(siteId));
-  });
-});
 
 describe("redis: rate limiting", () => {
   test.if(isRedisOk)("rateLimit allows up to max then blocks", async () => {
@@ -328,7 +298,7 @@ describe("public visitor counters", () => {
     const ctx = await setupSite();
     const { res, body } = await getPublicCount(ctx.siteKey);
     expect(res.status).toBe(200);
-    expect(body).toEqual({ totalVisitors: 0, activeVisitors: 0 });
+    expect(body).toEqual({ totalVisitors: 0 });
   });
 
   test.if(infraOk)("one visitor is counted once", async () => {
@@ -357,32 +327,6 @@ describe("public visitor counters", () => {
     ]);
     const { body } = await getPublicCount(ctx.siteKey);
     expect(body.totalVisitors).toBe(3);
-  });
-
-  test.if(infraOk)("activeVisitors uses live Redis presence", async () => {
-    const ctx = await setupSite();
-    const visitorId = randomUUID() + randomUUID();
-    await trackPV(ctx.siteKey, visitorId);
-    const { body } = await getPublicCount(ctx.siteKey);
-    expect(body.activeVisitors).toBeGreaterThanOrEqual(1);
-  });
-
-  test.if(infraOk)("expired Redis presence is not active", async () => {
-    const ctx = await setupSite();
-    const expiredHash = hash(randomUUID());
-    await redis.zadd(presenceKey(ctx.siteId), Date.now() - 1, expiredHash);
-    const { body } = await getPublicCount(ctx.siteKey);
-    expect(body.activeVisitors).toBe(0);
-    await redis.del(presenceKey(ctx.siteId));
-  });
-
-  test.if(infraOk)("multiple active visitors are counted from Redis", async () => {
-    const ctx = await setupSite();
-    const future = Date.now() + 60_000;
-    await redis.zadd(presenceKey(ctx.siteId), future, hash(randomUUID()), future, hash(randomUUID()));
-    const { body } = await getPublicCount(ctx.siteKey);
-    expect(body.activeVisitors).toBe(2);
-    await redis.del(presenceKey(ctx.siteId));
   });
 
   test.if(infraOk)("unknown site returns safe 404 and no private data", async () => {
@@ -536,132 +480,4 @@ describe("authorization: site ownership", () => {
     });
     expect(res.status).toBe(403);
   });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 7. WebSocket: validation and presence
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function wsConnect(): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(BASE.replace(/^http/, "ws") + "/ws/track");
-    ws.onopen = () => resolve(ws);
-    ws.onerror = reject;
-    setTimeout(() => reject(new Error("ws connect timeout")), 3000);
-  });
-}
-
-/** Wait for the initial welcome frame sent by the server on every new connection. */
-async function waitForWelcome(ws: WebSocket): Promise<void> {
-  return new Promise(resolve => { ws.onmessage = () => resolve(); });
-}
-
-/**
- * Send a presence payload and wait for the server's `{ok:true,type:"presence_ack"}`
- * response. Rejects if no ack arrives within `timeoutMs`.
- */
-async function sendPresenceAndWaitForAck(
-  ws: WebSocket,
-  payload: object,
-  timeoutMs = 3000
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      ws.onmessage = null;
-      reject(new Error(`presence_ack not received within ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    ws.onmessage = (e: MessageEvent) => {
-      try {
-        const msg = JSON.parse(e.data as string);
-        if (msg?.type === "presence_ack" && msg?.ok === true) {
-          clearTimeout(timer);
-          ws.onmessage = null;
-          resolve();
-        }
-      } catch { /* ignore non-JSON frames */ }
-    };
-
-    ws.send(JSON.stringify(payload));
-  });
-}
-
-describe("websocket: presence and validation", () => {
-  let ctx: Ctx;
-  beforeAll(async () => { if (infraOk) ctx = await setupSite(); });
-
-  test.if(infraOk)("server sends heartbeat config on connect", async () => {
-    const ws = await wsConnect();
-    const msg: string = await new Promise(resolve => {
-      ws.onmessage = e => resolve(e.data as string);
-    });
-    const parsed = JSON.parse(msg);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.heartbeatSeconds).toBe(30);
-    ws.close();
-  });
-
-  test.if(infraOk)("valid presence message updates Redis", async () => {
-    const vid = randomUUID() + randomUUID();
-    const ws = await wsConnect();
-    await waitForWelcome(ws);
-    await sendPresenceAndWaitForAck(ws, { siteKey: ctx.siteKey, visitorId: vid });
-    const count = await activeCount(ctx.siteId);
-    expect(count).toBeGreaterThanOrEqual(1);
-    ws.close();
-  });
-
-  test.if(infraOk)("oversized message (>500 chars) is rejected silently — no crash", async () => {
-    const ws = await wsConnect();
-    await waitForWelcome(ws);
-    ws.send("x".repeat(501));
-    await new Promise(r => setTimeout(r, 200));
-    expect(ws.readyState).not.toBe(WebSocket.CLOSED);
-    ws.close();
-  });
-
-  test.if(infraOk)("invalid JSON is ignored — connection stays open", async () => {
-    const ws = await wsConnect();
-    await waitForWelcome(ws);
-    ws.send("not json at all");
-    await new Promise(r => setTimeout(r, 200));
-    expect(ws.readyState).not.toBe(WebSocket.CLOSED);
-    ws.close();
-  });
-
-  test.if(infraOk)("missing siteKey field is rejected silently", async () => {
-    const ws = await wsConnect();
-    await waitForWelcome(ws);
-    ws.send(JSON.stringify({ visitorId: randomUUID() + randomUUID() }));
-    await new Promise(r => setTimeout(r, 200));
-    expect(ws.readyState).not.toBe(WebSocket.CLOSED);
-    ws.close();
-  });
-
-  test.if(infraOk)("too-short visitorId is rejected silently", async () => {
-    const ws = await wsConnect();
-    await waitForWelcome(ws);
-    ws.send(JSON.stringify({ siteKey: ctx.siteKey, visitorId: "short" }));
-    await new Promise(r => setTimeout(r, 200));
-    expect(ws.readyState).not.toBe(WebSocket.CLOSED);
-    ws.close();
-  });
-
-  test.if(infraOk)("websocket reconnect: second connection from same visitor refreshes presence", async () => {
-    const vid = randomUUID() + randomUUID();
-    const payload = { siteKey: ctx.siteKey, visitorId: vid };
-
-    const ws1 = await wsConnect();
-    await waitForWelcome(ws1);
-    await sendPresenceAndWaitForAck(ws1, payload);
-    ws1.close();
-
-    const ws2 = await wsConnect();
-    await waitForWelcome(ws2);
-    await sendPresenceAndWaitForAck(ws2, payload);
-    const count = await activeCount(ctx.siteId);
-    expect(count).toBeGreaterThanOrEqual(1);
-    ws2.close();
-  });
-
 });

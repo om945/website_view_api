@@ -1,15 +1,15 @@
 # Website View Tracker Backend
 
-Small website analytics backend for page views, anonymous visitors, sessions, custom events, and realtime active visitors.
+Small website analytics backend for page views, anonymous visitors, sessions, custom events, and historical analytics.
 
 ## Architecture
 
 ```text
 Browser → Vanilla tracking script → Bun/Elysia → PostgreSQL/Prisma
-                                      └──────→ Redis/WebSocket presence
+                                      └──────→ Redis rate limiting
 ```
 
-Stack: Bun, TypeScript, ElysiaJS, PostgreSQL, Prisma, Redis, WebSocket, Vanilla JavaScript, and Playwright.
+Stack: Bun, TypeScript, ElysiaJS, PostgreSQL, Prisma, Redis, Vanilla JavaScript, and Playwright.
 
 ## Project structure
 
@@ -17,7 +17,7 @@ Stack: Bun, TypeScript, ElysiaJS, PostgreSQL, Prisma, Redis, WebSocket, Vanilla 
 - `src/server.ts` starts the HTTP server and handles shutdown.
 - `src/config/` centralizes environment configuration.
 - `src/db/` owns the Prisma client.
-- `src/redis/` contains the connection, sorted-set presence, and rate limiting.
+- `src/redis/` contains the connection and rate limiting.
 - `src/utils/` contains hashing, domains, IP handling, user-agent parsing, and API errors.
 - `src/index.ts` contains the current Elysia route composition and is retained as the compatibility entry module for the app export.
 - `tracking/script.js` is the standalone browser SDK.
@@ -57,7 +57,7 @@ Unit tests skip PostgreSQL/Redis cases when those services are unavailable. Star
 </script>
 ```
 
-Use `data-debug="true"` for diagnostic console messages. The SDK persists an anonymous first-party visitor ID, sends page views, supports `pushState`, `replaceState`, and `popstate`, persists scalar custom events through `/api/v1/events`, and maintains one WebSocket with a 30-second heartbeat and bounded reconnect backoff.
+Use `data-debug="true"` for diagnostic console messages. The SDK persists an anonymous first-party visitor ID, sends page views, supports `pushState`, `replaceState`, and `popstate`, and persists scalar custom events through `/api/v1/events`. ViziAPI v1 is analytics-only; realtime Active Users are planned for v2.
 
 ## Metrics
 
@@ -66,7 +66,6 @@ Use `data-debug="true"` for diagnostic console messages. The SDK persists an ano
 - Unique visitor: a distinct anonymous visitor hash with a page view in the selected range.
 - Session: continuous activity from one visitor; a new session begins after **2 hours of inactivity**.
 - Page view: one accepted, idempotent page-view event.
-- Active visitor: a visitor present in the Redis sorted set with an unexpired 90-second presence score.
 
 Statistics use UTC server timestamps and PostgreSQL aggregation. Page results are capped at 100 paths.
 
@@ -78,11 +77,11 @@ Authentication: `GET /api/v1/auth/google`, callback, logout, and `/api/v1/auth/m
 
 Sites: `POST/GET /api/v1/sites`, `GET/PATCH/DELETE /api/v1/sites/:id`.
 
-Public ingestion: `POST /api/v1/track`, `POST /api/v1/events`, and `WS /ws/track`.
+Public ingestion: `POST /api/v1/track` and `POST /api/v1/events`.
 
 Authenticated analytics: `GET /api/v1/stats?siteKey=...&range=24h|7d|30d` and `GET /api/v1/stats/pages?...`.
 
-Public visitor counter: `GET /api/v1/public/sites/:siteKey/visitor-count` requires no developer authentication and returns only the two public counters:
+Public visitor counter: `GET /api/v1/public/sites/:siteKey/visitor-count` requires no developer authentication and returns the total visitor count:
 
 ```bash
 curl https://api.yourdomain.com/api/v1/public/sites/site_abc123/visitor-count
@@ -90,12 +89,11 @@ curl https://api.yourdomain.com/api/v1/public/sites/site_abc123/visitor-count
 
 ```json
 {
-  "totalVisitors": 12840,
-  "activeVisitors": 27
+  "totalVisitors": 12840
 }
 ```
 
-`totalVisitors` is the count of distinct anonymous visitors recorded for the site. `activeVisitors` is the current distinct visitor count from Redis presence and expires according to the existing heartbeat/TTL configuration. The endpoint returns `404` for an unknown site and is protected by its dedicated public-read rate limit (`PUBLIC_STATS_RATE_LIMIT_WINDOW_SECONDS` and `PUBLIC_STATS_RATE_LIMIT_MAX_REQUESTS`, defaulting to 60 requests per minute).
+`totalVisitors` is the count of distinct anonymous visitors recorded for the site. The endpoint returns `404` for an unknown site and is protected by its dedicated public-read rate limit (`PUBLIC_STATS_RATE_LIMIT_WINDOW_SECONDS` and `PUBLIC_STATS_RATE_LIMIT_MAX_REQUESTS`, defaulting to 60 requests per minute).
 
 ## Privacy
 
@@ -110,7 +108,6 @@ The repository includes `render.yaml` for a Docker web service. Use the reposito
 - Build command: Docker build from `Dockerfile` (or `bun install --frozen-lockfile && bun run db:generate && bun run build` for a native Bun service).
 - Start command: `bun run start` (Docker uses the equivalent `bun dist/server.js`).
 - Health check: `/health`; `/ready` is available for dependency readiness checks.
-- WebSockets: connect clients to `wss://<real-api-domain>/ws/track` after HTTPS is configured. Tracker clients send a presence heartbeat every 30 seconds; dashboard clients subscribe with `{ "type": "subscribe", "siteKey": "..." }` and receive aggregate `presence_update` events.
 - Production OAuth callback: `https://<real-api-domain>/api/v1/auth/google/callback`.
 
 Set the `DATABASE_URL`, `REDIS_URL`, OAuth, secrets, `TRACKER_BASE_URL`, and explicit `CORS_ORIGINS` values in Render’s environment settings. `CORS_ORIGINS` must include the deployed dashboard origin, for example `https://dashboard.example.com`. If you are intentionally testing the deployed Render API from a local Flutter Web dashboard, temporarily set `ALLOW_LOCALHOST_CORS_IN_PRODUCTION=true`; that switch allows dynamic `http://localhost:<port>` and `http://127.0.0.1:<port>` origins without reflecting arbitrary remote domains. Run `bun run db:migrate:deploy` against the production database as a release/migration step before serving traffic; do not use `db push`.
@@ -119,7 +116,7 @@ Set the `DATABASE_URL`, `REDIS_URL`, OAuth, secrets, `TRACKER_BASE_URL`, and exp
 Internet → HTTPS reverse proxy → Bun/Elysia → PostgreSQL + Redis
 ```
 
-Run PostgreSQL and Redis on a private network with authentication and TLS where your provider supports it. The application database user should have only the permissions it needs; do not use a database superuser. Redis is ephemeral presence/rate-limit state, while PostgreSQL remains the analytics source of truth.
+Run PostgreSQL and Redis on a private network with authentication and TLS where your provider supports it. The application database user should have only the permissions it needs; do not use a database superuser. Redis is used for rate limiting, while PostgreSQL remains the analytics source of truth.
 
 1. Create production secrets in your secret manager and set the variable names in `.env.example`.
 2. Configure Google Cloud OAuth with `GOOGLE_REDIRECT_URI` as `https://api.example.com/api/v1/auth/google/callback`.
@@ -127,7 +124,7 @@ Run PostgreSQL and Redis on a private network with authentication and TLS where 
 4. Deploy migrations with `bun run db:deploy`. Use `bun run db:migrate` only during local development; never use `db push` for production deployment.
 5. Build and start with `docker build -t website-view-api .` and inject environment variables at runtime.
 
-Use [deploy/nginx.conf.example](deploy/nginx.conf.example) as the reverse-proxy baseline. Terminate HTTPS there, pass `X-Forwarded-For`, `X-Forwarded-Proto`, and WebSocket upgrade headers, and set `TRUSTED_PROXY=true` only when traffic can reach Bun exclusively through that controlled proxy. Cloudflare/Caddy deployments follow the same rule. `/script.js` is cacheable for five minutes; analytics and authenticated API responses are `no-store`.
+Use [deploy/nginx.conf.example](deploy/nginx.conf.example) as the reverse-proxy baseline. Terminate HTTPS there, pass `X-Forwarded-For` and `X-Forwarded-Proto`, and set `TRUSTED_PROXY=true` only when traffic can reach Bun exclusively through that controlled proxy. Cloudflare/Caddy deployments follow the same rule. `/script.js` is cacheable for five minutes; analytics and authenticated API responses are `no-store`.
 
 ### Retention, backups, and rollback
 
@@ -137,4 +134,4 @@ Take encrypted PostgreSQL backups at least daily, retain them according to polic
 
 ### Monitoring and load checks
 
-Collect the JSON logs emitted by the service. Alert on 5xx spikes, readiness failures, Redis/PostgreSQL connection failures, high latency, unusual WebSocket failure rates, disk use, and memory use. Run `LOAD_TEST_SITE_KEY=... bun run load:test` against a non-production site key to measure ingestion throughput and latency; do not load-test production without capacity approval.
+Collect the JSON logs emitted by the service. Alert on 5xx spikes, readiness failures, Redis/PostgreSQL connection failures, high latency, disk use, and memory use. Run `LOAD_TEST_SITE_KEY=... bun run load:test` against a non-production site key to measure ingestion throughput and latency; do not load-test production without capacity approval.

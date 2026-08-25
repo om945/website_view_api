@@ -5,7 +5,6 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 
 import { prisma } from "./db/prisma";
 import { redis } from "./redis/redis";
-import { touchPresence, activeCount } from "./redis/presence";
 import { rateLimit } from "./redis/rate-limit";
 import { config } from "./config/config";
 import { clientIp } from "./utils/ip";
@@ -14,7 +13,6 @@ import { hash, newKey } from "./utils/hashing";
 import { parseUserAgent } from "./utils/user-agent";
 import { apiError, userFacingMessage, type ApiErrorCode } from "./utils/errors";
 import { logger } from "./utils/logger";
-import { publishPresence, subscribePresence, unsubscribePresence } from "./realtime/presence-events";
 import { requestId } from "./middleware/request-context";
 import { securityHeaders } from "./middleware/security";
 import { getPublicVisitorCount } from "./services/public-stats.service";
@@ -1043,9 +1041,6 @@ app.post(
       }
     }
 
-    const activeVisitors = await touchPresence(site.id, vh);
-    publishPresence(site.id, activeVisitors);
-
     return {
       ok: true,
     };
@@ -1131,9 +1126,6 @@ app.post(
       },
     });
 
-    const activeVisitors = await touchPresence(site.id, visitorIdHash);
-    publishPresence(site.id, activeVisitors);
-
     return {
       ok: true,
     };
@@ -1203,7 +1195,6 @@ app.get(
       sessions,
       newVisitors,
       returningVisitors,
-      active,
     ] = await Promise.all([
       prisma.pageView.count({
         where,
@@ -1247,7 +1238,6 @@ app.get(
           AND v."firstSeenAt" < ${since}
       `,
 
-      activeCount(o.site.id),
     ]);
 
     const uniqueVisitors = Number(
@@ -1265,7 +1255,6 @@ app.get(
       uniqueVisitors,
       newVisitors: newCount,
       returningVisitors: returningCount,
-      activeVisitors: active,
       sessions,
     };
   },
@@ -1348,96 +1337,5 @@ app.get(
     }),
   },
 );
-
-app.ws("/ws/track", {
-  maxPayloadLength: 2048,
-
-  open: (ws) =>
-    ws.send(
-      JSON.stringify({
-        ok: true,
-        heartbeatSeconds: config.heartbeatIntervalSeconds,
-      }),
-    ),
-
-  close: (ws) => {
-    const subscription = (ws as typeof ws & { presenceSiteId?: string }).presenceSiteId;
-    if (subscription) unsubscribePresence(subscription, ws);
-  },
-
-  message: async (ws, message) => {
-    try {
-
-      const obj: Record<string, unknown> =
-        typeof message === "string"
-          ? JSON.parse(message)
-          : (message as Record<string, unknown>);
-
-      if (typeof obj !== "object" || obj === null) {
-        return;
-      }
-
-      const raw = JSON.stringify(obj);
-
-      if (raw.length > 500) {
-        return;
-      }
-
-      const siteKey = obj["siteKey"];
-      const visitorId = obj["visitorId"];
-
-      if (obj["type"] === "subscribe") {
-        if (typeof siteKey !== "string" || siteKey.length < 5 || siteKey.length > 100) return;
-        const site = await prisma.site.findUnique({ where: { siteKey }, select: { id: true } });
-        if (!site) return;
-        const socket = ws as typeof ws & { presenceSiteId?: string };
-        if (socket.presenceSiteId) unsubscribePresence(socket.presenceSiteId, ws);
-        socket.presenceSiteId = site.id;
-        subscribePresence(site.id, ws);
-        ws.send(JSON.stringify({ ok: true, type: "presence_subscribed" }));
-        return;
-      }
-
-      if (
-        typeof siteKey !== "string" ||
-        siteKey.length < 5 ||
-        siteKey.length > 100
-      ) {
-        return;
-      }
-
-      if (
-        typeof visitorId !== "string" ||
-        visitorId.length < 10 ||
-        visitorId.length > 100
-      ) {
-        return;
-      }
-
-      const s = await prisma.site.findUnique({
-        where: {
-          siteKey,
-        },
-      });
-
-      if (!s) {
-        return;
-      }
-
-      const activeVisitors = await touchPresence(
-        s.id,
-        hash(visitorId),
-      );
-      publishPresence(s.id, activeVisitors);
-
-      ws.send(
-        JSON.stringify({
-          ok: true,
-          type: "presence_ack",
-        }),
-      );
-    } catch {}
-  },
-});
 
 export { app };
