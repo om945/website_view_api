@@ -6,7 +6,7 @@ Small website analytics backend for page views, anonymous visitors, sessions, cu
 
 ```text
 Browser → Vanilla tracking script → Bun/Elysia → PostgreSQL/Prisma
-                                      └──────→ Redis rate limiting
+                                      └──────→ Redis security rate limiting
 ```
 
 Stack: Bun, TypeScript, ElysiaJS, PostgreSQL, Prisma, Redis, Vanilla JavaScript, and Playwright.
@@ -17,7 +17,8 @@ Stack: Bun, TypeScript, ElysiaJS, PostgreSQL, Prisma, Redis, Vanilla JavaScript,
 - `src/server.ts` starts the HTTP server and handles shutdown.
 - `src/config/` centralizes environment configuration.
 - `src/db/` owns the Prisma client.
-- `src/redis/` contains the connection and rate limiting.
+- `src/redis/` contains the connection and distributed rate limiting for authentication and sensitive mutations.
+- `src/utils/local-rate-limit.ts` provides bounded per-process protection for high-volume public analytics ingestion and reads without Redis commands.
 - `src/utils/` contains hashing, domains, IP handling, user-agent parsing, and API errors.
 - `src/index.ts` contains the current Elysia route composition and is retained as the compatibility entry module for the app export.
 - `tracking/script.js` is the standalone browser SDK.
@@ -93,7 +94,11 @@ curl https://api.yourdomain.com/api/v1/public/sites/site_abc123/visitor-count
 }
 ```
 
-`totalVisitors` is the count of distinct anonymous visitors recorded for the site. The endpoint returns `404` for an unknown site and is protected by its dedicated public-read rate limit (`PUBLIC_STATS_RATE_LIMIT_WINDOW_SECONDS` and `PUBLIC_STATS_RATE_LIMIT_MAX_REQUESTS`, defaulting to 60 requests per minute).
+`totalVisitors` is the count of distinct anonymous visitors recorded for the site. The endpoint returns `404` for an unknown site and is protected by a bounded per-process public-read limit (`PUBLIC_STATS_RATE_LIMIT_WINDOW_SECONDS` and `PUBLIC_STATS_RATE_LIMIT_MAX_REQUESTS`, defaulting to 60 requests per minute).
+
+## Rate limiting and Redis usage
+
+Normal analytics reads (`/api/v1/stats`, `/api/v1/stats/pages`) and public analytics ingestion (`/api/v1/track`, `/api/v1/events`) do not use Redis. They remain protected by payload validation, site-key validation, request limits, and bounded per-process throttling. OAuth, authentication, and site mutation routes retain distributed Redis rate limiting using the atomic Lua limiter.
 
 ## Privacy
 

@@ -18,6 +18,7 @@ import { securityHeaders } from "./middleware/security";
 import { getPublicVisitorCount } from "./services/public-stats.service";
 import { corsAllows, corsOriginAllowed } from "./utils/cors";
 import { rateLimitPolicy } from "./utils/rate-limit-policy";
+import { localRateLimit } from "./utils/local-rate-limit";
 
 const error = apiError;
 
@@ -270,11 +271,32 @@ const app = new Elysia()
   .onBeforeHandle(async ({ request, set, server }) => {
     if (request.method !== "OPTIONS") {
       const path = new URL(request.url).pathname;
-      const policy = rateLimitPolicy(path);
+      const method = request.method;
+      const policy = rateLimitPolicy(path, method);
+      const ip = clientIp(request, server);
+
+      const localPolicy =
+        method === "POST" && path === "/api/v1/track"
+          ? {
+              scope: "analytics-ingestion",
+              max: config.rateMax,
+              windowSeconds: config.rateWindow,
+            }
+          : method === "POST" && path === "/api/v1/events"
+            ? {
+                scope: "analytics-ingestion",
+                max: config.rateMax,
+                windowSeconds: config.rateWindow,
+              }
+            : method === "GET" && path.startsWith("/api/v1/public/sites/")
+              ? {
+                  scope: "public-stats",
+                  max: config.publicStatsRateMax,
+                  windowSeconds: config.publicStatsRateWindow,
+                }
+              : null;
 
       if (policy) {
-        const ip = clientIp(request, server);
-
         if (
           !(await rateLimit(
             `${policy.scope}:${ip}`,
@@ -289,6 +311,22 @@ const app = new Elysia()
             429,
           );
         }
+      }
+
+      if (
+        localPolicy &&
+        !localRateLimit(
+          `${localPolicy.scope}:${ip}`,
+          localPolicy.max,
+          localPolicy.windowSeconds,
+        )
+      ) {
+        set.status = 429;
+        return error(
+          "RATE_LIMITED",
+          "Too many requests",
+          429,
+        );
       }
     }
   })
